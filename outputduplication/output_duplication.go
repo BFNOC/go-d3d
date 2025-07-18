@@ -343,8 +343,8 @@ func (dup *OutputDuplicator) updatePointer(info *dxgi.DXGI_OUTDUPL_FRAME_INFO) e
 						// out_pixels[outIndex+3] = 255 // a
 						*(*uint32)(unsafe.Pointer(&out_pixels[outIndex])) = 0x00000000
 					case andBit && xorBit: // Inverted (black)
-						// r, g, b, a = 255, 255, 255, 255
-						*(*uint32)(unsafe.Pointer(&out_pixels[outIndex])) = 0xFFFFFFFF
+						// r, g, b, a = 0, 0, 0, 255
+						*(*uint32)(unsafe.Pointer(&out_pixels[outIndex])) = 0xFF000000
 					}
 				}
 			}
