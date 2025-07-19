@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
 
 	"unsafe"
 
@@ -376,15 +377,86 @@ func (dup *OutputDuplicator) updatePointer(info *dxgi.DXGI_OUTDUPL_FRAME_INFO) e
 	return nil
 }
 
+// analyzeBackgroundBrightness checks the area around the cursor to determine if background is light or dark
+func (dup *OutputDuplicator) analyzeBackgroundBrightness(img *image.RGBA) bool {
+	// Sample area around cursor position
+	sampleSize := 20
+	startX := int(dup.pointerInfo.pos.X) - sampleSize
+	startY := int(dup.pointerInfo.pos.Y) - sampleSize
+	endX := int(dup.pointerInfo.pos.X) + int(dup.pointerInfo.size.X) + sampleSize
+	endY := int(dup.pointerInfo.pos.Y) + int(dup.pointerInfo.size.Y) + sampleSize
+
+	// Ensure bounds are within image
+	if startX < 0 {
+		startX = 0
+	}
+	if startY < 0 {
+		startY = 0
+	}
+	if endX >= img.Bounds().Max.X {
+		endX = img.Bounds().Max.X - 1
+	}
+	if endY >= img.Bounds().Max.Y {
+		endY = img.Bounds().Max.Y - 1
+	}
+
+	var totalBrightness uint64
+	var pixelCount uint64
+
+	for y := startY; y <= endY; y++ {
+		for x := startX; x <= endX; x++ {
+			// Skip cursor area itself
+			if x >= int(dup.pointerInfo.pos.X) && x < int(dup.pointerInfo.pos.X)+int(dup.pointerInfo.size.X) &&
+				y >= int(dup.pointerInfo.pos.Y) && y < int(dup.pointerInfo.pos.Y)+int(dup.pointerInfo.size.Y) {
+				continue
+			}
+
+			r, g, b, _ := img.At(x, y).RGBA()
+			// Calculate BT.601 luminance using standard formula
+			brightness := uint64(0.299*float64(r>>8) + 0.587*float64(g>>8) + 0.114*float64(b>>8))
+			totalBrightness += brightness
+			pixelCount++
+		}
+	}
+
+	if pixelCount == 0 {
+		return false // Default to dark background
+	}
+
+	avgBrightness := totalBrightness / pixelCount
+	// Lower threshold to better detect dark themes like VSCode
+	// If average brightness > 80 (roughly 1/3 of 0-255 range), consider it light background
+	// This helps distinguish between dark themes (30-60) and light themes (200-255)
+	// For example:
+	// cmd.exe avgBrightness=15
+	// VSCode Default Dark Theme avgBrightness=31
+
+	return avgBrightness > 80
+}
+
 func (dup *OutputDuplicator) drawPointer(img *image.RGBA) error {
+	isLightBackground := dup.analyzeBackgroundBrightness(img)
+
 	for j := 0; j < int(dup.pointerInfo.size.Y); j++ {
 		for i := 0; i < int(dup.pointerInfo.size.X); i++ {
 			col := dup.pointerInfo.shapeOutBuffer.At(i, j)
-			_, _, _, a := col.RGBA()
+			r, g, b, a := col.RGBA()
 			if a == 0 {
 				// just dont draw invisible pixel?
 				// TODO: correctly apply mask
 				continue
+			}
+
+			// For inverted cursor pixels (text cursor), adapt color based on background
+			// Check for black pixels that came from monochrome cursor "andBit && xorBit" case
+			if r == 0 && g == 0 && b == 0 && a == 0xFFFF {
+				if isLightBackground {
+					// Keep black cursor on light background
+					col = color.RGBA{R: 0, G: 0, B: 0, A: 255}
+				} else {
+					// Use white cursor on dark background
+					col = color.RGBA{R: 255, G: 255, B: 255, A: 255}
+				}
 			}
 
 			img.Set(int(dup.pointerInfo.pos.X)+i, int(dup.pointerInfo.pos.Y)+j, col)
