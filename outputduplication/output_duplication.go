@@ -343,8 +343,8 @@ func (dup *OutputDuplicator) updatePointer(info *dxgi.DXGI_OUTDUPL_FRAME_INFO) e
 						// out_pixels[outIndex+2] = 0   // b
 						// out_pixels[outIndex+3] = 255 // a
 						*(*uint32)(unsafe.Pointer(&out_pixels[outIndex])) = 0x00000000
-					case andBit && xorBit: // Inverted (black)
-						// r, g, b, a = 0, 0, 0, 255
+					case andBit && xorBit: // Inverted (adaptive color)
+						// Start with black, will be made adaptive in drawPointer based on background
 						*(*uint32)(unsafe.Pointer(&out_pixels[outIndex])) = 0xFF000000
 					}
 				}
@@ -354,20 +354,38 @@ func (dup *OutputDuplicator) updatePointer(info *dxgi.DXGI_OUTDUPL_FRAME_INFO) e
 			dup.pointerInfo.size = dxgi.POINT{X: int32(pointerInfo.Width), Y: int32(pointerInfo.Height)}
 
 			out, in := dup.pointerInfo.shapeOutBuffer.Pix, dup.pointerInfo.shapeInBuffer
+			width := int(pointerInfo.Width)
 			for j := 0; j < int(pointerInfo.Height); j++ {
-				tout := out[j*int(pointerInfo.Pitch):]
-				tin := in[j*int(pointerInfo.Pitch):]
-				copy(tout, tin[:pointerInfo.Pitch])
+				// Output buffer stride: width * 4 bytes per pixel (RGBA)
+				tout := out[j*width*4 : (j+1)*width*4]
+				// Input buffer stride: uses pointerInfo.Pitch
+				tin := in[j*int(pointerInfo.Pitch) : j*int(pointerInfo.Pitch)+width*4]
+				copy(tout, tin)
+			}
+
+			// Convert BGRA to RGBA
+			for i := 0; i < len(out); i += 4 {
+				// Swap B and R channels: out[i] is B, out[i+2] is R
+				out[i], out[i+2] = out[i+2], out[i]
 			}
 		case dxgi.DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR:
 			dup.pointerInfo.size = dxgi.POINT{X: int32(pointerInfo.Width), Y: int32(pointerInfo.Height)}
 
 			// TODO: Properly add mask
 			out, in := dup.pointerInfo.shapeOutBuffer.Pix, dup.pointerInfo.shapeInBuffer
+			width := int(pointerInfo.Width)
 			for j := 0; j < int(pointerInfo.Height); j++ {
-				tout := out[j*int(pointerInfo.Pitch):]
-				tin := in[j*int(pointerInfo.Pitch):]
-				copy(tout, tin[:pointerInfo.Pitch])
+				// Output buffer stride: width * 4 bytes per pixel (RGBA)
+				tout := out[j*width*4 : (j+1)*width*4]
+				// Input buffer stride: uses pointerInfo.Pitch
+				tin := in[j*int(pointerInfo.Pitch) : j*int(pointerInfo.Pitch)+width*4]
+				copy(tout, tin)
+			}
+
+			// Convert BGRA to RGBA
+			for i := 0; i < len(out); i += 4 {
+				// Swap B and R channels: out[i] is B, out[i+2] is R
+				out[i], out[i+2] = out[i+2], out[i]
 			}
 		default:
 			dup.pointerInfo.size = dxgi.POINT{X: 0, Y: 0}
